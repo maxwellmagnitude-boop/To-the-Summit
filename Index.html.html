@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Summit Scramble</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&display=swap');
+        
+        body {
+            font-family: 'Fredoka', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #0f172a;
+        }
+        
+        canvas { display: block; }
+
+        .ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        .start-screen, .game-over-screen {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            pointer-events: auto;
+            max-width: 90%;
+            width: 320px;
+            border: 4px solid #3b82f6;
+        }
+
+        .hidden { display: none !important; }
+        
+        /* Retro scanlines */
+        .scanlines {
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.02));
+            background-size: 100% 4px;
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none; z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-800">
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="ui-layer">
+        <div class="flex justify-between items-start w-full max-w-lg mx-auto">
+            <div class="text-white drop-shadow-md">
+                <div class="text-sm opacity-80">HEIGHT</div>
+                <div class="text-3xl font-bold tracking-wider" id="scoreDisplay">0m</div>
+            </div>
+            <div class="text-white drop-shadow-md text-right">
+                <div class="text-sm opacity-80">BEST</div>
+                <div class="text-xl font-bold" id="highScoreDisplay">0m</div>
+            </div>
+        </div>
+        <div class="w-full flex justify-between px-4 pb-4 md:hidden opacity-50 text-white text-sm font-bold pointer-events-none">
+            <span>&lt; TAP LEFT</span>
+            <span>TAP RIGHT &gt;</span>
+        </div>
+    </div>
+
+    <div class="scanlines"></div>
+
+    <div id="startScreen" class="start-screen">
+        <svg class="w-16 h-16 mx-auto text-blue-600 mb-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,19H5V5H19V19M11,7H13V9H15V11H13V17H11V11H9V9H11V7Z" />
+        </svg>
+        <h1 class="text-3xl font-bold text-slate-800 mb-2">Summit Scramble</h1>
+        <p class="text-slate-500 mb-6 text-sm">Chaos Mode Unlocks at 1000m!</p>
+        <button id="startBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg uppercase tracking-wide">Start Climbing</button>
+    </div>
+
+    <div id="gameOverScreen" class="game-over-screen hidden">
+        <h2 class="text-2xl font-bold text-slate-800 mb-1">YOU FELL!</h2>
+        <div class="text-4xl font-bold text-blue-600 mb-4" id="finalScore">0m</div>
+        <p class="text-slate-500 mb-6 text-sm" id="highScoreMessage">Try again?</p>
+        <button id="restartBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg uppercase tracking-wide">Climb Again</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const highScoreDisplay = document.getElementById('highScoreDisplay');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const highScoreMessage = document.getElementById('highScoreMessage');
+
+        let state = 'MENU';
+        let width, height;
+        let animationFrameId;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('summitScrambleHighScore')) || 0;
+
+        // Physics
+        const GRAVITY = 0.4;
+        const JUMP_FORCE = -11;
+        const FRICTION = 0.85;
+
+        // Time Step Control
+        let lastTime = 0;
+        let accumulator = 0;
+        const TIME_STEP = 1000 / 60; // 60 FPS fixed physics
+
+        // Entities
+        let player = { x: 0, y: 0, vx: 0, vy: 0, width: 30, height: 40, facingRight: true };
+        let platforms = [];
+        let particles = [];
+        let cameraY = 0;
+        let keys = { left: false, right: false };
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            if (state === 'MENU') resetGame();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+            if (e.code === 'Space' && state === 'GAMEOVER') restartGame();
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+        });
+        window.addEventListener('touchstart', (e) => {
+            if (e.target.tagName !== 'BUTTON') {
+                e.preventDefault();
+                const touchX = e.touches[0].clientX;
+                keys.left = touchX < width / 2;
+                keys.right = touchX >= width / 2;
+            }
+        }, { passive: false });
+        window.addEventListener('touchend', (e) => {
+            if (e.target.tagName !== 'BUTTON') {
+                e.preventDefault();
+                keys.left = false;
+                keys.right = false;
+            }
+        });
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+        function resetGame() {
+            player.vx = 0; player.vy = 0;
+            score = 0; cameraY = 0;
+            platforms = [];
+            
+            // Safe spawn
+            const startWidth = 200;
+            platforms.push({ x: (width - startWidth)/2, y: height - 80, w: startWidth, h: 20, type: 'normal', active: true });
+            player.x = width/2 - player.width/2;
+            player.y = height - 150;
+            
+            generatePlatforms(height);
+            updateScoreUI();
+        }
+
+        function startGame() {
+            state = 'PLAYING';
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            resetGame();
+            
+            // Reset timing
+            lastTime = performance.now();
+            accumulator = 0;
+            
+            loop(lastTime);
+        }
+
+        function restartGame() { startGame(); }
+
+        function gameOver() {
+            state = 'GAMEOVER';
+            cancelAnimationFrame(animationFrameId);
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('summitScrambleHighScore', highScore);
+                highScoreMessage.innerText = "New Record!";
+                highScoreMessage.classList.add('text-green-600');
+            } else {
+                highScoreMessage.innerText = "Try again?";
+                highScoreMessage.classList.remove('text-green-600');
+            }
+            finalScoreDisplay.innerText = `${Math.floor(score)}m`;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function updateScoreUI() {
+            scoreDisplay.innerText = `${Math.floor(score)}m`;
+            highScoreDisplay.innerText = `${Math.floor(highScore)}m`;
+        }
+
+        function generatePlatforms(targetY) {
+            let highestY = height;
+            let lastX = width / 2;
+
+            if (platforms.length > 0) {
+                const last = platforms[platforms.length - 1];
+                highestY = last.y;
+                lastX = last.x + last.w / 2;
+            }
+
+            while (highestY > targetY - height) {
+                // Gap logic: reduce gap if previous platform was low bounce (Sticky or Heavy)
+                let minGap = 70; 
+                let gapRange = 40;
+                
+                // DIFFICULTY: Increase gap by 1px every 100m, capped at +25px
+                let gapIncrease = Math.min(25, Math.floor(score / 100));
+                
+                if (platforms.length > 0) {
+                    const prev = platforms[platforms.length - 1];
+                    if (prev.type === 'sticky' || prev.type === 'heavy') {
+                        minGap = 35; gapRange = 25; 
+                        gapIncrease = 0; // Don't increase gap for low-bounce platforms
+                    }
+                }
+                
+                highestY -= (minGap + gapIncrease + Math.random() * gapRange);
+
+                // Platform Type Logic
+                let type = 'normal';
+                const specials = [];
+                
+                // Progression - UNLOCKS EARLIER NOW
+                if (score >= 50) specials.push('moving');     // Was 200
+                if (score >= 150) specials.push('fragile');   // Was 300
+                if (score >= 250) specials.push('spring');    // Was 400
+                if (score >= 400) specials.push('fast');      // Was 500
+                if (score >= 500) specials.push('ghost');     // Was 600
+                if (score >= 600) specials.push('tiny');      // Was 700
+                if (score >= 700) specials.push('sticky');    // Was 800
+                if (score >= 800) specials.push('rocket');    // Was 900
+                
+                // 1000m+ Unlocks
+                if (score >= 1000) {
+                    specials.push('conveyor', 'blink', 'wobble', 'trampoline', 'wide', 'nano', 'chaos', 'mystery', 'windy', 'heavy');
+                }
+
+                // INCREASED FREQUENCY: Starts at 30% chance, ramps up faster (capped at 95%)
+                const specialChance = Math.min(0.95, 0.3 + (score / 2000));
+                
+                if (specials.length > 0 && Math.random() < specialChance) {
+                    type = specials[Math.floor(Math.random() * specials.length)];
+                }
+
+                // Width Logic: Shrinks faster now (divide by 100 instead of 200)
+                let maxW = Math.max(40, 80 - (score/100));
+                let minW = Math.max(30, 50 - (score/100));
+                
+                if (type === 'tiny') { maxW = 30; minW = 20; }
+                if (type === 'nano') { maxW = 20; minW = 15; }
+                if (type === 'wide') { maxW = 180; minW = 150; }
+
+                const w = Math.floor(Math.random() * (maxW - minW + 1) + minW);
+
+                // Horizontal Constraint
+                let minX = Math.max(0, lastX - 250);
+                let maxX = Math.min(width - w, lastX + 250);
+                const x = Math.random() * (maxX - minX) + minX;
+                lastX = x + w/2;
+
+                // Speed Init: Increases with score
+                let speedMod = Math.min(4, score / 500); // Up to +4 extra speed
+                let speed = 0;
+                
+                if (type === 'moving') speed = (3 + speedMod) * (Math.random() > 0.5 ? 1 : -1);
+                if (type === 'fast') speed = (6 + speedMod) * (Math.random() > 0.5 ? 1 : -1);
+
+                platforms.push({
+                    x: x, y: highestY, w: w, h: 15,
+                    type: type, speed: speed, active: true,
+                    initialY: highestY, initialX: x,
+                    timer: Math.random() * 100 
+                });
+            }
+        }
+
+        function createParticles(x, y, count, color) {
+            for(let i=0; i<count; i++) {
+                particles.push({
+                    x: x + Math.random()*20 - 10, y: y,
+                    vx: Math.random()*4 - 2, vy: Math.random()*-2 - 1,
+                    life: 1.0, color: color
+                });
+            }
+        }
+
+        // --- NEW GAME LOOP STRUCTURE ---
+
+        function loop(timestamp) {
+            if (state !== 'PLAYING') return;
+            
+            // Calculate delta time
+            let deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            // Cap lag to prevent spiral of death
+            if (deltaTime > 1000) deltaTime = TIME_STEP;
+            
+            accumulator += deltaTime;
+            
+            // Run physics updates in fixed time steps
+            while (accumulator >= TIME_STEP) {
+                update();
+                accumulator -= TIME_STEP;
+            }
+            
+            // Draw as fast as the screen allows
+            draw();
+            
+            animationFrameId = requestAnimationFrame(loop);
+        }
+
+        function update() {
+            // Player Physics
+            player.vy += GRAVITY;
+            player.y += player.vy;
+            if (keys.left) { player.vx -= 1; player.facingRight = false; }
+            if (keys.right) { player.vx += 1; player.facingRight = true; }
+            player.vx *= FRICTION;
+            player.x += player.vx;
+
+            if (player.x + player.width < 0) player.x = width;
+            if (player.x > width) player.x = -player.width;
+
+            // Camera / Scrolling
+            if (player.y < height / 2) {
+                const diff = height/2 - player.y;
+                player.y = height/2;
+                platforms.forEach(p => {
+                    p.y += diff;
+                    p.initialY += diff;
+                });
+                score += diff / 5;
+                cameraY += diff;
+                generatePlatforms(0);
+                platforms = platforms.filter(p => p.y < height + 100);
+                updateScoreUI();
+            }
+
+            // Platform Logic
+            const now = Date.now();
+            platforms.forEach(p => {
+                if (p.type === 'moving' || p.type === 'fast') {
+                    p.x += p.speed;
+                    if (p.x <= 0 || p.x + p.w >= width) p.speed *= -1;
+                }
+                else if (p.type === 'wobble') {
+                    p.y = p.initialY + Math.sin(now/300) * 30;
+                }
+                else if (p.type === 'chaos') {
+                    p.x = p.initialX + Math.sin(now/200) * 40;
+                    p.y = p.initialY + Math.cos(now/150) * 20;
+                }
+                else if (p.type === 'blink') {
+                    const active = Math.floor((now + p.timer*100)/1000) % 2 === 0;
+                    p.active = active;
+                }
+
+                // Collision
+                if (player.vy > 0 && p.active) {
+                    if (player.x + player.width > p.x && player.x < p.x + p.w &&
+                        player.y + player.height > p.y && player.y + player.height < p.y + 20) {
+                        
+                        let jump = JUMP_FORCE;
+                        let col = '#fff';
+
+                        // Jump Modifiers
+                        if (p.type === 'spring') { jump *= 1.4; col = '#a78bfa'; }
+                        else if (p.type === 'rocket') { jump *= 1.8; col = '#f97316'; }
+                        else if (p.type === 'trampoline') { jump *= 1.6; col = '#6366f1'; }
+                        else if (p.type === 'sticky') { jump *= 0.7; col = '#4b5563'; }
+                        else if (p.type === 'heavy') { jump *= 0.6; col = '#1e293b'; }
+                        else if (p.type === 'mystery') { jump *= (0.8 + Math.random()); col = '#d946ef'; }
+
+                        // Horizontal Modifiers
+                        if (p.type === 'conveyor') player.vx += 8;
+                        if (p.type === 'windy') player.vx += (Math.random()>0.5 ? 10 : -10);
+
+                        player.vy = jump;
+                        player.y = p.y - player.height;
+                        createParticles(player.x+player.width/2, player.y+player.height, 5, col);
+                        
+                        if (p.type === 'fragile') {
+                            p.active = false;
+                            createParticles(p.x+p.w/2, p.y, 8, '#B45309');
+                        }
+                    }
+                }
+            });
+
+            // Particles Update
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            if (player.y > height) gameOver();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Dynamic Sky
+            const gradient = ctx.createLinearGradient(0, 0, 0, height);
+            if (score < 1000) { gradient.addColorStop(0, '#87CEEB'); gradient.addColorStop(1, '#E0F7FA'); }
+            else if (score < 5000) { gradient.addColorStop(0, '#2c3e50'); gradient.addColorStop(1, '#fd746c'); }
+            else { gradient.addColorStop(0, '#0f0c29'); gradient.addColorStop(1, '#302b63'); }
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+
+            // Drawing Platforms
+            platforms.forEach(p => {
+                // Blink ghost
+                if (p.type === 'blink' && !p.active) {
+                    ctx.globalAlpha = 0.2;
+                    ctx.fillStyle = '#22c55e';
+                    roundRect(ctx, p.x, p.y, p.w, p.h, 5, true, false);
+                    ctx.globalAlpha = 1.0;
+                    return;
+                }
+                if (!p.active) return;
+
+                let c = '#65a30d', d = '#84cc16'; // Normal
+                switch(p.type) {
+                    case 'moving': c='#2563eb'; d='#60a5fa'; break;
+                    case 'fragile': c='#b45309'; d='#d97706'; break;
+                    case 'spring': c='#7c3aed'; d='#a78bfa'; break;
+                    case 'fast': c='#dc2626'; d='#f87171'; break;
+                    case 'ghost': c='rgba(255,255,255,0.4)'; d='rgba(255,255,255,0.6)'; break;
+                    case 'tiny': c='#eab308'; d='#facc15'; break;
+                    case 'sticky': c='#374151'; d='#4b5563'; break;
+                    case 'rocket': c='#ea580c'; d='#fb923c'; break;
+                    // New Types
+                    case 'conveyor': c='#475569'; d='#94a3b8'; break;
+                    case 'blink': c='#15803d'; d='#22c55e'; break;
+                    case 'wobble': c='#be185d'; d='#f472b6'; break;
+                    case 'trampoline': c='#4338ca'; d='#6366f1'; break;
+                    case 'wide': c='#0f766e'; d='#14b8a6'; break;
+                    case 'nano': c='#cbd5e1'; d='#f1f5f9'; break;
+                    case 'chaos': c='#c026d3'; d='#e879f9'; break;
+                    case 'mystery': c='#86198f'; d='#d946ef'; break;
+                    case 'windy': c='#0ea5e9'; d='#bae6fd'; break;
+                    case 'heavy': c='#0f172a'; d='#334155'; break;
+                }
+
+                // Shadow
+                if (p.type !== 'ghost') {
+                    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                    ctx.fillRect(p.x+4, p.y+4, p.w, p.h);
+                }
+
+                ctx.fillStyle = c;
+                roundRect(ctx, p.x, p.y, p.w, p.h, 5, true, false);
+
+                // Details
+                ctx.fillStyle = d;
+                if (p.type === 'conveyor') for(let i=0; i<p.w; i+=15) ctx.fillRect(p.x+i, p.y, 5, p.h);
+                else if (p.type === 'blink') ctx.fillRect(p.x+2, p.y+2, p.w-4, p.h-4);
+                else if (p.type === 'mystery') { ctx.fillStyle='white'; ctx.font='10px Fredoka'; ctx.fillText('?', p.x+p.w/2-3, p.y+11); }
+                else if (p.type === 'sticky') { ctx.fillRect(p.x+5, p.y, p.w-10, 3); ctx.fillRect(p.x+10, p.y+3, 5, 5); ctx.fillRect(p.x+25, p.y+3, 5, 3); }
+                else if (['spring','rocket','trampoline'].includes(p.type)) ctx.fillRect(p.x+p.w/2-10, p.y-3, 20, 6);
+                else if (p.type === 'windy') { ctx.fillRect(p.x, p.y+2, p.w, 1); ctx.fillRect(p.x, p.y+6, p.w*0.8, 1); }
+                else ctx.fillRect(p.x, p.y, p.w, 4);
+            });
+
+            // Particles Draw
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 4, 4);
+                ctx.globalAlpha = 1.0;
+            }
+
+            // Player Draw
+            ctx.save();
+            let stretch = 1 + Math.abs(player.vy) * 0.02;
+            let squash = 1 - Math.abs(player.vy) * 0.01;
+            let cx = player.x + player.width/2;
+            let cy = player.y + player.height;
+            ctx.translate(cx, cy);
+            ctx.scale(squash, stretch);
+            ctx.translate(-cx, -cy);
+
+            ctx.fillStyle = '#e11d48'; // Shirt
+            roundRect(ctx, player.x, player.y+10, player.width, player.height-10, 5, true, false);
+            ctx.fillStyle = '#fca5a5'; // Head
+            ctx.beginPath(); ctx.arc(player.x+player.width/2, player.y+5, 12, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#ef4444'; // Headband
+            ctx.fillRect(player.x+player.width/2-12, player.y-5, 24, 4);
+            ctx.fillStyle = '#475569'; // Backpack
+            if (player.facingRight) ctx.fillRect(player.x-5, player.y+12, 5, 20);
+            else ctx.fillRect(player.x+player.width, player.y+12, 5, 20);
+            ctx.fillStyle = 'white'; // Eyes
+            const eo = player.facingRight ? 4 : -4;
+            ctx.beginPath(); ctx.arc(player.x+player.width/2+eo, player.y+4, 3, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black';
+            ctx.beginPath(); ctx.arc(player.x+player.width/2+eo+(player.facingRight?1:-1), player.y+4, 1, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+
+        function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+            if (fill) ctx.fill();
+            if (stroke) ctx.stroke();
+        }
+    </script>
+</body>
+</html>
