@@ -1,0 +1,19 @@
+{
+  "background_color": "#ffffff",
+  "description": "Leap through chaotic, shifting platforms and scramble your way to the peak in this arcade climber! To the Summit is an addictive, fast-paced vertical jumper where every meter counts! Take control of a fearless mountain climber and scale an ever-shifting peak packed with dynamic hazards, bizarre physics, and intense platforming challenges.",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "To The Summit",
+  "orientation": "portrait",
+  "scope": "/",
+  "short_name": "Tothesum",
+  "start_url": "./index.html",
+  "theme_color": "#ffffff",
+  "id": "12345",
+  "lang": "en",
+  "prefer_related_applications": false,
+  "categories": [
+    "games",
+    "kids"
+  ]
+}
