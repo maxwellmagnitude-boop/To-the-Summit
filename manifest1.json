@@ -1,19 +1,48 @@
 {
-  "background_color": "#ffffff",
-  "description": "Leap through chaotic, shifting platforms and scramble your way to the peak in this arcade climber! To the Summit is an addictive, fast-paced vertical jumper where every meter counts! Take control of a fearless mountain climber and scale an ever-shifting peak packed with dynamic hazards, bizarre physics, and intense platforming challenges.",
-  "dir": "ltr",
-  "display": "standalone",
-  "name": "To The Summit",
-  "orientation": "portrait",
-  "scope": "/",
-  "short_name": "Tothesum",
+  "name": TotheSummit,
+  "short_name": "TotheSum",
+  "description": "Leap through chaotic, shifting platforms and scramble your way to the peak in this arcade climber!",
   "start_url": "./index.html",
-  "theme_color": "#ffffff",
-  "id": "12345",
-  "lang": "en",
-  "prefer_related_applications": false,
-  "categories": [
-    "games",
-    "kids"
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5351/5351486.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "Screenshot1.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "To the Summit Gameplay Preview 1"
+    },
+    {
+      "src": "Screenshot2.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "To the Summit Gameplay Preview 2"
+    },
+    {
+      "src": "Screenshot3.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "To the Summit Gameplay Preview 3"
+    },
+    {
+      "src": "Screenshot4.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "To the Summit Gameplay Preview 4"
+    }
   ]
 }
